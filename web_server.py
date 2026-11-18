@@ -3979,6 +3979,24 @@ def generate_playlist_m3u():
             )
             file_path_map[idx] = matched_path
 
+        # Filesystem fallback: files already organised into the Transfer folder
+        # but not (yet) in the media-server library DB, matched by embedded tags.
+        if any(v is None for v in file_path_map.values()):
+            try:
+                from core.library.m3u_fs_index import build_index as _fs_index
+                _fs_root = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
+                _fs = _fs_index(_fs_root) if os.path.isdir(_fs_root) else {}
+                for idx, track in enumerate(tracks):
+                    if file_path_map.get(idx):
+                        continue
+                    cands = _fs.get(_clean(track.get('artist', '') or ''))
+                    if cands:
+                        file_path_map[idx] = choose_best_title_candidate(
+                            _norm(track.get('name', '') or ''), _clean(track.get('name', '') or ''), cands,
+                            lambda left, right: SequenceMatcher(None, left, right).ratio())
+            except Exception as _fs_err:
+                logger.warning("m3u filesystem fallback failed: %s", _fs_err)
+
         # where it will be saved, worked out up front so entries can be
         # relative to it. a content-only request has no folder: absolute.
         will_save = save_to_disk and (force or config_manager.get('m3u_export.enabled', False))
@@ -6083,6 +6101,7 @@ def _spotify_auth_result_page(detail_text: str, authenticated: bool = True) -> s
 
 
 @app.route('/callback')
+@app.route('/api/spotify/callback')
 def spotify_callback():
     """
     Handles Spotify OAuth callback via the main Flask app (port 8008).
@@ -13957,8 +13976,13 @@ def _compute_m3u_folder(transfer_dir, context_type, playlist_name, artist_name='
             'quality': ''
         }
         folder_path, _ = _get_file_path_from_template(template_context, 'playlist_path')
-        if folder_path:
+        # A playlist_path template with no $playlist in its folder part (e.g. the
+        # Artist/Album layout) renders "placeholder" segments; keep all playlist
+        # M3Us together in <Transfer>/Playlists instead of a bogus folder.
+        if folder_path and 'placeholder' not in folder_path:
             return os.path.join(transfer_dir, folder_path)
+        if folder_path:
+            return os.path.join(transfer_dir, 'Playlists')
         # Fallback
         playlist_sanitized = _sanitize_filename(playlist_name)
         return os.path.join(transfer_dir, playlist_sanitized)
