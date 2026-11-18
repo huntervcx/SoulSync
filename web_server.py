@@ -13981,8 +13981,15 @@ def _compute_m3u_folder(transfer_dir, context_type, playlist_name, artist_name='
         # M3Us together in <Transfer>/Playlists instead of a bogus folder.
         if folder_path and 'placeholder' not in folder_path:
             return os.path.join(transfer_dir, folder_path)
+        # One sub-folder per SoulSync profile so each user's playlists stay apart.
+        _profile_dir = 'default'
+        try:
+            _prof = get_database().get_profile(get_current_profile_id()) or {}
+            _profile_dir = _sanitize_filename(str(_prof.get('name') or '').strip()) or 'default'
+        except Exception:
+            pass
         if folder_path:
-            return os.path.join(transfer_dir, 'Playlists')
+            return os.path.join(transfer_dir, 'Playlists', _profile_dir)
         # Fallback
         playlist_sanitized = _sanitize_filename(playlist_name)
         return os.path.join(transfer_dir, playlist_sanitized)
